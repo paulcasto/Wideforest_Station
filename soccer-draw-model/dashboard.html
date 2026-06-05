@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Soccer Draw Probability Model – Kalshi</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0b0e14;
+    --surface:   #131720;
+    --surface2:  #1c2231;
+    --border:    #252d3d;
+    --accent:    #00e5a0;
+    --accent2:   #3d7aff;
+    --red:       #ff4d6d;
+    --yellow:    #ffd166;
+    --muted:     #5a6585;
+    --text:      #dde3f0;
+    --text-dim:  #8892a8;
+    --mono:      'Space Mono', monospace;
+    --sans:      'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  .app { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
+  .logo { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.08em; }
+  .logo span { color: var(--muted); }
+  .live-pill { background: #ff4d6d22; border: 1px solid var(--red); color: var(--red);
+               font-family: var(--mono); font-size: 11px; padding: 4px 10px; border-radius: 20px;
+               display: flex; align-items: center; gap: 6px; }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  .match-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+               padding: 16px 20px; margin-bottom: 24px;
+               display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .match-teams { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; }
+  .vs-badge { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--surface2);
+              padding: 3px 8px; border-radius: 4px; }
+  .match-meta { font-size: 13px; color: var(--text-dim); margin-left: auto; font-family: var(--mono); }
+  .score-display { font-family: var(--mono); font-size: 28px; font-weight: 700; letter-spacing: 0.05em;
+                   color: var(--accent); background: var(--surface2); padding: 6px 18px; border-radius: 8px;
+                   border: 1px solid var(--border); }
+
+  .grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; margin-bottom: 24px; }
+  @media(max-width:860px){ .grid { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .panel-title { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.1em;
+                 text-transform: uppercase; margin-bottom: 16px; }
+
+  .chart-wrap { position: relative; height: 240px; }
+  svg.timeline { width: 100%; height: 100%; overflow: visible; }
+
+  .blend-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .blend-label { font-size: 13px; color: var(--text-dim); width: 90px; }
+  .blend-bar-bg { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .blend-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+  .blend-pct { font-family: var(--mono); font-size: 12px; width: 42px; text-align: right; }
+
+  .big-prob { font-family: var(--mono); font-size: 48px; font-weight: 700; color: var(--accent);
+              text-align: center; letter-spacing: -1px; margin: 12px 0 4px; }
+  .big-prob-label { text-align: center; font-size: 12px; color: var(--text-dim); font-family: var(--mono); margin-bottom: 20px; }
+
+  .signal-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+  .signal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+                 padding: 14px 12px; text-align: center; }
+  .signal-name { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-bottom: 8px; }
+  .signal-val { font-size: 22px; font-weight: 600; font-family: var(--mono); }
+  .signal-weight { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+  .signal-bar { height: 3px; border-radius: 2px; margin-top: 8px; background: var(--surface2); }
+  .signal-bar-fill { height: 100%; border-radius: 2px; background: var(--accent2); }
+
+  .alerts-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .alert-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; position: relative; overflow: hidden; }
+  .alert-card.buy-yes  { border-color: var(--accent); background: #00e5a008; }
+  .alert-card.buy-no   { border-color: var(--red);    background: #ff4d6d08; }
+  .alert-card.pass     { border-color: var(--border);  }
+  .alert-card.upcoming { border-style: dashed; opacity: 0.6; }
+  .alert-min { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+  .alert-action { font-family: var(--mono); font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+  .alert-card.buy-yes  .alert-action { color: var(--accent); }
+  .alert-card.buy-no   .alert-action { color: var(--red); }
+  .alert-card.pass     .alert-action { color: var(--text-dim); }
+  .alert-card.upcoming .alert-action { color: var(--muted); }
+  .alert-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .alert-stat { font-size: 11px; color: var(--text-dim); }
+  .alert-stat strong { display: block; font-family: var(--mono); font-size: 14px; color: var(--text); }
+  .alert-edge { font-family: var(--mono); font-size: 12px; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px; }
+  .alert-card.buy-yes .alert-edge { background: #00e5a022; color: var(--accent); }
+  .alert-card.buy-no  .alert-edge { background: #ff4d6d22; color: var(--red); }
+  .alert-card.pass    .alert-edge { background: var(--surface2); color: var(--muted); }
+
+  .controls { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+              padding: 16px 20px; display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+  .control-group { display: flex; flex-direction: column; gap: 6px; }
+  .control-label { font-size: 11px; color: var(--muted); font-family: var(--mono); text-transform: uppercase; }
+  input[type=range] { width: 140px; accent-color: var(--accent); }
+  .ctrl-val { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+  select, input[type=number] {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 6px; font-family: var(--mono); font-size: 13px;
+  }
+
+  footer { text-align: center; font-size: 11px; color: var(--muted); font-family: var(--mono);
+           margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">DRAW<span>//</span>MODEL <span>v1.0</span></div>
+    <div class="live-pill"><div class="live-dot"></div> LIVE SIMULATION</div>
+  </header>
+
+  <div class="controls" style="margin-bottom:24px">
+    <div class="control-group">
+      <span class="control-label">Home xG</span>
+      <input type="range" id="hxg" min="0.3" max="3.0" step="0.1" value="1.2" oninput="refresh()">
+      <span class="ctrl-val" id="hxg-val">1.2</span>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Away xG</span>
+      <input type="range" id="axg" min="0.3" max="3.0" step="0.1" value="1.0" oninput="refresh()">
+      <span class="ctrl-val" id="axg-val">1.0</span>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Home Score</span>
+      <input type="number" id="hscore" value="1" min="0" max="9" style="width:70px" oninput="refresh()">
+    </div>
+    <div class="control-group">
+      <span class="control-label">Away Score</span>
+      <input type="number" id="ascore" value="1" min="0" max="9" style="width:70px" oninput="refresh()">
+    </div>
+    <div class="control-group">
+      <span class="control-label">Minute</span>
+      <input type="range" id="minute" min="1" max="90" value="70" oninput="refresh()">
+      <span class="ctrl-val" id="min-val">70'</span>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Kalshi Price</span>
+      <input type="range" id="kprice" min="5" max="60" value="28" oninput="refresh()">
+      <span class="ctrl-val" id="kprice-val">28¢</span>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Pre-game prob</span>
+      <input type="range" id="pregame" min="10" max="55" value="28" oninput="refresh()">
+      <span class="ctrl-val" id="pregame-val">28%</span>
+    </div>
+  </div>
+
+  <div class="match-bar">
+    <div class="match-teams">
+      <span id="home-name">Manchester City</span>
+      <span class="vs-badge">VS</span>
+      <span id="away-name">Arsenal</span>
+    </div>
+    <div class="score-display" id="score-display">1 – 1</div>
+    <div class="match-meta" id="match-meta">70' · Premier League · Kalshi: SOCCER-EPL-DRAW</div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-title">Draw Probability Timeline</div>
+      <div class="chart-wrap">
+        <svg class="timeline" id="timeline-svg" viewBox="0 0 700 220"></svg>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Probability Blend</div>
+      <div class="big-prob" id="big-prob">—</div>
+      <div class="big-prob-label">BLENDED DRAW PROB</div>
+
+      <div class="blend-row">
+        <div class="blend-label">Pre-game</div>
+        <div class="blend-bar-bg"><div class="blend-bar-fill" id="pre-bar" style="background:var(--accent2);width:0%"></div></div>
+        <div class="blend-pct" id="pre-pct">—</div>
+      </div>
+      <div class="blend-row">
+        <div class="blend-label" style="color:var(--text)">Live Poisson</div>
+        <div class="blend-bar-bg"><div class="blend-bar-fill" id="live-bar" style="background:var(--accent);width:0%"></div></div>
+        <div class="blend-pct" id="live-pct">—</div>
+      </div>
+      <div class="blend-row">
+        <div class="blend-label">Kalshi price</div>
+        <div class="blend-bar-bg"><div class="blend-bar-fill" id="k-bar" style="background:var(--yellow);width:0%"></div></div>
+        <div class="blend-pct" id="k-pct">—</div>
+      </div>
+
+      <hr style="border-color:var(--border);margin:16px 0">
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.7" id="blend-detail">—</div>
+    </div>
+  </div>
+
+  <div class="signal-grid" id="signal-grid"></div>
+  <div class="alerts-row" id="alerts-row"></div>
+
+  <footer>SOCCER DRAW MODEL · KALSHI TRADE ENGINE · Built on Football-Data.org + Understat xG · Not financial advice</footer>
+</div>
+
+<script>
+function poissonPMF(k, lam) {
+  if (lam <= 0) return k === 0 ? 1 : 0;
+  let logP = -lam + k * Math.log(lam);
+  for (let i = 2; i <= k; i++) logP -= Math.log(i);
+  return Math.exp(logP);
+}
+
+function scoreProb(diff, lH, lA) {
+  let draw = 0, home = 0, away = 0;
+  for (let k = 0; k <= 8; k++) {
+    const pk = poissonPMF(k, lH);
+    if (pk < 1e-9) continue;
+    for (let j = 0; j <= 8; j++) {
+      const pj = poissonPMF(j, lA);
+      if (pj < 1e-9) continue;
+      const p = pk * pj;
+      const net = diff + k - j;
+      if (net === 0) draw += p;
+      else if (net > 0) home += p;
+      else away += p;
+    }
+  }
+  const tot = draw + home + away || 1;
+  return { draw: draw/tot, home: home/tot, away: away/tot };
+}
+
+function liveWeight(minute) {
+  const raw = 1 / (1 + Math.exp(-(minute - 40) / 15));
+  return Math.max(0.05, Math.min(0.97, raw));
+}
+
+function computeBlend(hXG, aXG, hScore, aScore, minute, preProb) {
+  const frac = Math.max(0, (90 - minute)) / 90;
+  const lH = hXG * frac;
+  const lA = aXG * frac;
+  const diff = hScore - aScore;
+  const { draw: liveProb } = scoreProb(diff, lH, lA);
+
+  const wLive = liveWeight(minute);
+  const wPre = 1 - wLive;
+  let blended = wPre * preProb + wLive * liveProb;
+
+  if (minute >= 85) {
+    if (Math.abs(diff) >= 2) blended *= 0.05;
+    else if (Math.abs(diff) === 1) blended *= 0.35;
+  } else if (minute >= 75 && Math.abs(diff) >= 2) {
+    blended *= 0.12;
+  }
+  blended = Math.max(0.01, Math.min(0.99, blended));
+
+  return { blended, liveProb, wLive, wPre, lH, lA };
+}
+
+function computeSignals(hXG, aXG) {
+  const diff = Math.abs(hXG - aXG);
+  const sigma = 0.8;
+  const xgSim = Math.exp(-(diff*diff) / (2*sigma*sigma));
+  return [
+    { name: 'XG SIM',    val: xgSim, weight: 0.30 },
+    { name: 'H2H DRAW',  val: 0.27,  weight: 0.20 },
+    { name: 'LG DRAW',   val: 0.265, weight: 0.20 },
+    { name: 'TABLE GAP', val: 0.18 + (0.35 - 0.18) * Math.exp(-4 / 15), weight: 0.15 },
+    { name: 'FORM',      val: 0.24,  weight: 0.15 },
+  ];
+}
+
+function buildTimeline(hXG, aXG, hScore, aScore, preProb, kPrice, currentMin) {
+  const W = 700, H = 220, pad = { t:16, b:30, l:38, r:16 };
+  const cw = W - pad.l - pad.r;
+  const ch = H - pad.t - pad.b;
+  const minutes = Array.from({length:91},(_,i)=>i+1);
+  const blends  = minutes.map(m => computeBlend(hXG, aXG, hScore, aScore, m, preProb).blended);
+  const lives   = minutes.map(m => {
+    const frac = Math.max(0,(90-m)/90);
+    return scoreProb(hScore - aScore, hXG*frac, aXG*frac).draw;
+  });
+
+  const xS = m => pad.l + ((m-1)/89)*cw;
+  const yS = v => pad.t + (1 - v)*ch;
+
+  function makePath(vals) {
+    return vals.map((v,i) => `${i===0?'M':'L'}${xS(minutes[i])},${yS(v)}`).join(' ');
+  }
+
+  let svg = '';
+  for (let p = 0; p <= 1; p += 0.25) {
+    const y = yS(p);
+    svg += `<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1c2231" stroke-width="1"/>`;
+    svg += `<text x="${pad.l-6}" y="${y+4}" font-size="10" fill="#5a6585" text-anchor="end" font-family="Space Mono">${Math.round(p*100)}</text>`;
+  }
+  for (const m of [0,15,30,45,60,75,90]) {
+    const x = xS(m+1);
+    svg += `<line x1="${x}" y1="${pad.t}" x2="${x}" y2="${H-pad.b}" stroke="#1c2231" stroke-width="1"/>`;
+    svg += `<text x="${x}" y="${H-pad.b+14}" font-size="10" fill="#5a6585" text-anchor="middle" font-family="Space Mono">${m}'</text>`;
+  }
+
+  const kY = yS(kPrice);
+  svg += `<line x1="${pad.l}" y1="${kY}" x2="${W-pad.r}" y2="${kY}" stroke="#ffd166" stroke-width="1.5" stroke-dasharray="4,4" opacity="0.7"/>`;
+  svg += `<text x="${W-pad.r+2}" y="${kY+4}" font-size="9" fill="#ffd166" font-family="Space Mono">KALSHI</text>`;
+  svg += `<path d="${makePath(lives)}" fill="none" stroke="#3d7aff" stroke-width="1.5" opacity="0.4"/>`;
+  const preY = yS(preProb);
+  svg += `<line x1="${pad.l}" y1="${preY}" x2="${W-pad.r}" y2="${preY}" stroke="#3d7aff" stroke-width="1" stroke-dasharray="3,5" opacity="0.5"/>`;
+  svg += `<path d="${makePath(blends)}" fill="none" stroke="#00e5a0" stroke-width="2.5"/>`;
+
+  for (const cp of [60, 70, 80]) {
+    const cx = xS(cp);
+    const cv = computeBlend(hXG, aXG, hScore, aScore, cp, preProb).blended;
+    const cy = yS(cv);
+    svg += `<line x1="${cx}" y1="${pad.t}" x2="${cx}" y2="${H-pad.b}" stroke="#ffffff" stroke-width="0.5" opacity="0.15"/>`;
+    svg += `<circle cx="${cx}" cy="${cy}" r="5" fill="#00e5a0" stroke="#0b0e14" stroke-width="2"/>`;
+    svg += `<text x="${cx}" y="${pad.t-4}" font-size="9" fill="#8892a8" text-anchor="middle" font-family="Space Mono">${cp}'</text>`;
+  }
+
+  if (currentMin >= 1 && currentMin <= 90) {
+    const mx = xS(currentMin);
+    const mv = computeBlend(hXG, aXG, hScore, aScore, currentMin, preProb).blended;
+    const my = yS(mv);
+    svg += `<line x1="${mx}" y1="${pad.t}" x2="${mx}" y2="${H-pad.b}" stroke="#00e5a0" stroke-width="1.5" opacity="0.5"/>`;
+    svg += `<circle cx="${mx}" cy="${my}" r="7" fill="#00e5a0" stroke="#0b0e14" stroke-width="2.5"/>`;
+    svg += `<text x="${mx}" y="${my-12}" font-size="10" fill="#00e5a0" text-anchor="middle" font-family="Space Mono">${currentMin}'</text>`;
+  }
+
+  svg += `<text x="${pad.l}" y="${H}" font-size="9" fill="#00e5a0" font-family="Space Mono">─ BLENDED</text>`;
+  svg += `<text x="${pad.l+75}" y="${H}" font-size="9" fill="#3d7aff" opacity="0.7" font-family="Space Mono">── LIVE POISSON</text>`;
+  svg += `<text x="${pad.l+195}" y="${H}" font-size="9" fill="#ffd166" font-family="Space Mono">- - KALSHI</text>`;
+
+  document.getElementById('timeline-svg').innerHTML = svg;
+}
+
+function buildAlerts(hXG, aXG, hScore, aScore, preProb, kPrice, currentMin) {
+  const BUY_THRESH = 0.06;
+  const container = document.getElementById('alerts-row');
+  container.innerHTML = '';
+
+  for (const cp of [60, 70, 80]) {
+    const r = computeBlend(hXG, aXG, hScore, aScore, cp, preProb);
+    const edge = r.blended - kPrice;
+    let action, cls;
+    if (cp > currentMin) {
+      action = 'UPCOMING'; cls = 'upcoming';
+    } else if (edge > BUY_THRESH) {
+      action = 'BUY YES'; cls = 'buy-yes';
+    } else if (edge < -BUY_THRESH) {
+      action = 'BUY NO'; cls = 'buy-no';
+    } else {
+      action = 'PASS'; cls = 'pass';
+    }
+    const kelly = cls === 'buy-yes' ? Math.max(0, (r.blended - kPrice) / (1 - kPrice) * 0.25)
+                : cls === 'buy-no'  ? Math.max(0, (kPrice - r.blended) / kPrice * 0.25) : 0;
+    const edgeSign = edge >= 0 ? '+' : '';
+    container.innerHTML += `
+      <div class="alert-card ${cls}">
+        <div class="alert-min">CHECKPOINT · ${cp}'</div>
+        <div class="alert-action">${action}</div>
+        <div class="alert-edge">${edgeSign}${(edge*100).toFixed(1)}pp edge</div>
+        <div class="alert-stats">
+          <div class="alert-stat"><strong>${(r.blended*100).toFixed(1)}%</strong>Model Prob</div>
+          <div class="alert-stat"><strong>${(kPrice*100).toFixed(1)}%</strong>Kalshi Imp.</div>
+          <div class="alert-stat"><strong>${(r.wLive*100).toFixed(0)}%/${(r.wPre*100).toFixed(0)}%</strong>Live/Pre wt</div>
+          <div class="alert-stat"><strong>${(kelly*100).toFixed(1)}%</strong>Kelly size</div>
+        </div>
+      </div>`;
+  }
+}
+
+function buildSignals(hXG, aXG) {
+  const signals = computeSignals(hXG, aXG);
+  const container = document.getElementById('signal-grid');
+  container.innerHTML = '';
+  for (const sig of signals) {
+    const barW = Math.round(sig.val * 100);
+    const color = sig.val > 0.30 ? 'var(--accent)' : sig.val > 0.22 ? 'var(--accent2)' : 'var(--red)';
+    container.innerHTML += `
+      <div class="signal-card">
+        <div class="signal-name">${sig.name}</div>
+        <div class="signal-val" style="color:${color}">${(sig.val*100).toFixed(1)}%</div>
+        <div class="signal-weight">wt: ${(sig.weight*100).toFixed(0)}%</div>
+        <div class="signal-bar"><div class="signal-bar-fill" style="width:${barW}%;background:${color}"></div></div>
+      </div>`;
+  }
+}
+
+function refresh() {
+  const hXG    = parseFloat(document.getElementById('hxg').value);
+  const aXG    = parseFloat(document.getElementById('axg').value);
+  const hScore = parseInt(document.getElementById('hscore').value) || 0;
+  const aScore = parseInt(document.getElementById('ascore').value) || 0;
+  const minute = parseInt(document.getElementById('minute').value);
+  const kCents = parseInt(document.getElementById('kprice').value);
+  const prePct = parseInt(document.getElementById('pregame').value);
+  const kPrice = kCents / 100;
+  const preProb = prePct / 100;
+
+  document.getElementById('hxg-val').textContent    = hXG.toFixed(1);
+  document.getElementById('axg-val').textContent    = aXG.toFixed(1);
+  document.getElementById('min-val').textContent    = minute + "'";
+  document.getElementById('kprice-val').textContent = kCents + '¢';
+  document.getElementById('pregame-val').textContent = prePct + '%';
+  document.getElementById('score-display').textContent = `${hScore} – ${aScore}`;
+  document.getElementById('match-meta').textContent = `${minute}' · Premier League · Kalshi: SOCCER-EPL-DRAW`;
+
+  const r = computeBlend(hXG, aXG, hScore, aScore, minute, preProb);
+
+  document.getElementById('big-prob').textContent = (r.blended*100).toFixed(1) + '%';
+  document.getElementById('pre-bar').style.width  = (preProb*100) + '%';
+  document.getElementById('live-bar').style.width = (r.liveProb*100) + '%';
+  document.getElementById('k-bar').style.width    = (kPrice*100) + '%';
+  document.getElementById('pre-pct').textContent  = (preProb*100).toFixed(1) + '%';
+  document.getElementById('live-pct').textContent = (r.liveProb*100).toFixed(1) + '%';
+  document.getElementById('k-pct').textContent    = (kPrice*100).toFixed(1) + '%';
+
+  const edge = r.blended - kPrice;
+  const sign = edge >= 0 ? '+' : '';
+  document.getElementById('blend-detail').innerHTML =
+    `w_pre: <b style="color:var(--accent2)">${(r.wPre*100).toFixed(1)}%</b> &nbsp;|&nbsp; ` +
+    `w_live: <b style="color:var(--accent)">${(r.wLive*100).toFixed(1)}%</b><br>` +
+    `&lambda;_home: <b>${r.lH.toFixed(3)}</b> &nbsp; &lambda;_away: <b>${r.lA.toFixed(3)}</b><br>` +
+    `Edge vs Kalshi: <b style="color:${edge>0?'var(--accent)':'var(--red)'}">${sign}${(edge*100).toFixed(1)}pp</b><br>` +
+    `Score state: <b>${hScore===aScore?'DRAWING':hScore>aScore?'HOME LEAD':'AWAY LEAD'}</b>`;
+
+  buildTimeline(hXG, aXG, hScore, aScore, preProb, kPrice, minute);
+  buildSignals(hXG, aXG);
+  buildAlerts(hXG, aXG, hScore, aScore, preProb, kPrice, minute);
+}
+
+refresh();
+</script>
+</body>
+</html>
