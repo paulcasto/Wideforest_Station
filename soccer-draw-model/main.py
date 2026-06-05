@@ -2,15 +2,19 @@
 Soccer Draw Probability Model – Main Runner
 ============================================
 Usage:
-  python main.py --setup              # Create DB schema, seed leagues
-  python main.py --fetch PL 2024      # Pull Football-Data.org matches + standings
-  python main.py --xg EPL 2024        # Sync Understat xG data
-  python main.py --stats PL           # Compute league draw stats
-  python main.py --score              # Pre-game score upcoming matches (next 3 days)
-  python main.py --live PL            # Update live scores
-  python main.py --eval 1 70 1 1      # Evaluate match_id=1 at 70' (1-1 score)
-  python main.py --monitor 1 PL       # Start live match monitor for match_id=1
-  python main.py --backtest PL 50     # Backtest on last 50 finished PL matches
+  python main.py --setup                     # Create DB schema, seed leagues
+  python main.py --fetch PL 2024             # Pull Football-Data.org matches + standings
+  python main.py --xg EPL 2024               # Sync Understat xG data
+  python main.py --stats PL                  # Compute league draw stats
+  python main.py --score                     # Pre-game score upcoming matches (next 3 days)
+  python main.py --live PL                   # Update live scores
+  python main.py --eval 1 70 1 1             # Evaluate match_id=1 at 70' (1-1 score)
+  python main.py --monitor 1 PL              # Start live match monitor for match_id=1
+  python main.py --backtest PL 50            # Backtest on last 50 finished PL matches
+  python main.py --tickers                   # Match Kalshi markets → DB (next 7 days)
+  python main.py --tickers 2025-01-10 2025-01-17  # Same, explicit date range
+  python main.py --watchlist                 # Print upcoming matches with Kalshi tickers
+  python main.py --watchlist 14              # Same, 14-day lookahead
 
 Environment variables:
   FD_API_KEY        – Football-Data.org API key (free tier: 10 calls/min)
@@ -49,6 +53,13 @@ def main():
                    help="Start live match monitor (polls every 30s, fires at 60/70/80')")
     p.add_argument("--backtest", nargs=2, metavar=("FD_CODE", "LIMIT"),
                    help="Backtest trade alerts on historical finished matches")
+    p.add_argument("--tickers", nargs="*", metavar="DATE",
+                   help="Sync Kalshi draw-market tickers to DB. "
+                        "Optional: DATE_FROM DATE_TO (YYYY-MM-DD). "
+                        "Defaults to today + 7 days.")
+    p.add_argument("--watchlist", nargs="?", const=7, type=int, metavar="DAYS",
+                   help="Print upcoming matches with matched Kalshi tickers "
+                        "and live yes_price. Optional: days lookahead (default 7).")
     args = p.parse_args()
 
     if args.setup:
@@ -122,8 +133,89 @@ def main():
         stats = backtest_alerts(fd_code, limit)
         print(json.dumps(stats, indent=2))
 
+    elif args.tickers is not None:
+        from fetchers.kalshi_markets import sync_tickers
+        import json
+        dates = args.tickers  # [] or [from] or [from, to]
+        date_from = dates[0] if len(dates) > 0 else None
+        date_to   = dates[1] if len(dates) > 1 else None
+        result = sync_tickers(date_from=date_from, date_to=date_to)
+        print(f"Fetched {result['fetched']} markets  |  "
+              f"Matched {result['matched']}  |  "
+              f"Unmatched {result['unmatched']}")
+        if result["unmatched_titles"]:
+            print("\nUnmatched markets (add aliases or fetch missing teams):")
+            for t in result["unmatched_titles"]:
+                print(f"  {t}")
+
+    elif args.watchlist is not None:
+        from fetchers.kalshi_markets import get_watchlist
+        days  = args.watchlist
+        rows  = get_watchlist(days_ahead=days)
+        if not rows:
+            print(f"No upcoming matches with Kalshi tickers in the next {days} days.")
+            print("Run  python main.py --tickers  first to match markets.")
+        else:
+            _print_watchlist(rows)
+
     else:
         p.print_help()
+
+
+def _print_watchlist(rows: list) -> None:
+    """Pretty-print the watchlist table."""
+    col_w = {"date": 16, "match": 40, "ticker": 32, "yes": 8, "oi": 8, "prob": 8}
+    header = (
+        f"{'DATE':<{col_w['date']}}"
+        f"{'MATCH':<{col_w['match']}}"
+        f"{'KALSHI TICKER':<{col_w['ticker']}}"
+        f"{'YES':>{col_w['yes']}}"
+        f"{'OI':>{col_w['oi']}}"
+        f"{'PRE-PROB':>{col_w['prob']}}"
+    )
+    sep = "─" * len(header)
+    print(sep)
+    print(header)
+    print(sep)
+
+    current_date = None
+    for r in rows:
+        match_date = (r["match_date"] or "")[:16].replace("T", " ")
+        if match_date[:10] != current_date:
+            if current_date is not None:
+                print()
+            current_date = match_date[:10]
+
+        match_str   = f"{r['home']} vs {r['away']}"
+        ticker      = r["ticker"] or ""
+        yes_price   = r["yes_price"]
+        oi          = r["open_interest"] or 0
+        pre_prob    = r["pre_draw_prob"]
+
+        yes_str  = f"{yes_price:.1f}¢" if yes_price is not None else "  —  "
+        oi_str   = str(oi) if oi else "—"
+        prob_str = f"{pre_prob*100:.1f}%" if pre_prob is not None else "  —  "
+
+        # Highlight edge if model probability meaningfully differs from market
+        edge_flag = ""
+        if yes_price is not None and pre_prob is not None:
+            edge = pre_prob - yes_price / 100
+            if edge > 0.06:
+                edge_flag = f"  <-- +{edge*100:.1f}pp EDGE"
+            elif edge < -0.06:
+                edge_flag = f"  <-- {edge*100:.1f}pp"
+
+        print(
+            f"{match_date:<{col_w['date']}}"
+            f"{match_str[:col_w['match']-1]:<{col_w['match']}}"
+            f"{ticker:<{col_w['ticker']}}"
+            f"{yes_str:>{col_w['yes']}}"
+            f"{oi_str:>{col_w['oi']}}"
+            f"{prob_str:>{col_w['prob']}}"
+            f"{edge_flag}"
+        )
+    print(sep)
+    print(f"  {len(rows)} match(es) with Kalshi coverage")
 
 
 if __name__ == "__main__":
